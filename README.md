@@ -34,6 +34,9 @@ This means that some fit for me, some are too tight.
 
 ## Flasher PCB
 The Flash chip on the cartridge can be re-flashed using an Arduino Mega and a "flasher shield".
+**Make sure to insert the cartridge PCB's side with the Flash chip oriented towards the marked "chip-side" on the flasher PCB.**
+
+<img src="./images/flasher.png" alt="drawing" width="600"/>
 
 ### BOM
 | **Reference** | **Part** | **Link** |
@@ -42,7 +45,30 @@ The Flash chip on the cartridge can be re-flashed using an Arduino Mega and a "f
 
 
 ## Flashing Software
-Very soon to be uploaded.
+Can be found under the code directory.
+As a first step, program the Arduino Mega using the given .ino file and the Arduino IDE.
+You don't need to redo this step anymore.
+
+### Flashing script
+A ROM file is flashed onto the cartridge by using the Python script ```flash.py```.
+Make sure that you have Python installed. You also need the PySerial package.
+
+The flash script can be used as follows:
+```
+flash.py ROMFILE COMPORT [MIRROR]
+```
+
+The parameter ```MIRROR``` is optional an can be either ```TRUE``` or ```FALSE``` (by default it is turned off).
+
+Enabling ```MIRROR``` can be used to make "small" ROMs work (smaller than 2 MB). 
+This is due to the that those smaller cartridges do not have the uppper address lines connected.
+Hence the content "repeats" from the view of the handheld and it seems that it relies on this. 
+As a "fix", I added the ```MIRROR``` option to the flashing script which repeats the content of the ROM along the 2 MB.
+E.g., Lights Out only has the lower 15 address lines connected (from a total of 21 address lines). 
+That means adress 0x0 will be the same as 0x8000, or 0x10000, etc.
+My current guess is that the header is always checked at 0x40000, but just padding the header to that address is not enough.
+
+Flashing a full 2 MB ROM currently takes around 15 minutes.
 
 ## Disclaimer
 **Use the files and/or schematics to build your own board at your own risk**.
