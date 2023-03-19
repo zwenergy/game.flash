@@ -27,7 +27,10 @@ Original game.com cartridge PCB seem to have a thickness of 1.0 mm or slightly a
 
 
 ### Cartridge Case
-A 3D printable cartridge case should come soon.
+An initial version of a 3D printable case is inside the case folder.
+There are 2 "back part" versions.
+One which has a "lip" like the original case (harder to print with an FDM printer), and one which has "flap" which more FDM printer-friendly.
+<img src="./images/GC_orig.PNG" alt="drawing" width="400"/>
 
 A regular game.com cartridge case *should* work, although the cases seem to have quite some tolerance.
 This means that some fit for me, some are too tight.
