@@ -1,6 +1,5 @@
 # game.flash
 A Flash cartridge for the Tiger game.com handheld.
-Still in the works.
 
 ## Cartridge PCB
 <img src="./images/cart.png" alt="drawing" width="600"/>
