@@ -1,5 +1,9 @@
-// Pin defintions. Note that when these are changed,
-// pin-related functions need to updated manually.
+// Types (assuming you have these typedef'd elsewhere, standardizing for safety)
+typedef uint32_t u32;
+typedef uint8_t  u8;
+
+// Pin definitions kept for reference, but physical manipulation 
+// is now handled directly via hardware PORT registers.
 #define A0 22
 #define A1 23
 #define A2 24
@@ -31,194 +35,124 @@
 #define D6 49
 #define D7 50
 
-#define nWE 2
-#define nRP 3
-#define nRB 4
-#define CE 51
-#define nOE 52
+#define nWE 2  // PE4
+#define nRP 3  // PE5
+#define nRB 4  // PG5
+#define CE 51  // PB2
+#define nOE 52 // PB1
+
+// Fast Control Pin Macros
+#define nWE_HIGH (PORTE |= (1 << 4))
+#define nWE_LOW  (PORTE &= ~(1 << 4))
+#define nRP_HIGH (PORTE |= (1 << 5))
+#define nRP_LOW  (PORTE &= ~(1 << 5))
+#define CE_HIGH  (PORTB |= (1 << 2))
+#define CE_LOW   (PORTB &= ~(1 << 2))
+#define nOE_HIGH (PORTB |= (1 << 1))
+#define nOE_LOW  (PORTB &= ~(1 << 1))
 
 // Debug offset for dumping
 #define OFFSET 262144
 //#define OFFSET 0
 #define MAXADDR 2097152
 
-// Some NOP definitions.
-// Yes, this is very pretty. But we do not have code size problems,
-// hence using stupid sequences of NOPs makes it nicely timing 
-// predictable.
+// Baud rate.
+#define BAUD (250000)
+
+// Wait time for chip erase. This is typically 25 seconds according to the data sheet, yet 
+// at max. 120 seconds. If flashing is not done correctly, trying increasing this time value.
+#define ERASE_WAIT_MS 30000
+
+// NOP definitions for timing predictability
 #define NOP1 asm volatile( "nop\n" )
 #define NOP2 NOP1; NOP1
-
 #define WAITSEQ NOP2
 
 #define RXBYTES 32
 
 void setDatPinsInput() {
-  pinMode( D0, INPUT );
-  pinMode( D1, INPUT );
-  pinMode( D2, INPUT );
-  pinMode( D3, INPUT );
-  pinMode( D4, INPUT );
-  pinMode( D5, INPUT );
-  pinMode( D6, INPUT );
-  pinMode( D7, INPUT );
+  // D0-D6 map to PL6-PL0. D7 maps to PB3.
+  DDRL &= 0b10000000; // Set PL0-PL6 to INPUT (leaves PL7 / A20 alone)
+  DDRB &= ~(1 << 3);  // Set PB3 to INPUT
 }
 
 void setDatPinsOutput() {
-  pinMode( D0, OUTPUT );
-  pinMode( D1, OUTPUT );
-  pinMode( D2, OUTPUT );
-  pinMode( D3, OUTPUT );
-  pinMode( D4, OUTPUT );
-  pinMode( D5, OUTPUT );
-  pinMode( D6, OUTPUT );
-  pinMode( D7, OUTPUT );
+  // D0-D6 map to PL6-PL0. D7 maps to PB3.
+  DDRL |= 0b01111111; // Set PL0-PL6 to OUTPUT (leaves PL7 / A20 alone)
+  DDRB |= (1 << 3);   // Set PB3 to OUTPUT
 }
 
 void setup() {
-  Serial.begin( 250000 );
+  Serial.begin( BAUD );
   
-  // Pin directions
-  pinMode( A0, OUTPUT );
-  pinMode( A1, OUTPUT );
-  pinMode( A2, OUTPUT );
-  pinMode( A3, OUTPUT );
-  pinMode( A4, OUTPUT );
-  pinMode( A5, OUTPUT );
-  pinMode( A6, OUTPUT );
-  pinMode( A7, OUTPUT );
-  pinMode( A8, OUTPUT );
-  pinMode( A9, OUTPUT );
-  pinMode( A10, OUTPUT );
-  pinMode( A11, OUTPUT );
-  pinMode( A12, OUTPUT );
-  pinMode( A13, OUTPUT );
-  pinMode( A14, OUTPUT );
-  pinMode( A15, OUTPUT );
-  pinMode( A16, OUTPUT );
-  pinMode( A17, OUTPUT );
-  pinMode( A18, OUTPUT );
-  pinMode( A19, OUTPUT );
-  pinMode( A20, OUTPUT );
+  // Set Address Pins to OUTPUT directly via Data Direction Registers (DDR)
+  DDRA = 0xFF;         // A0-A7 (Pins 22-29) -> PA0-PA7
+  DDRC = 0xFF;         // A8-A15 (Pins 30-37) -> PC7-PC0
+  DDRD |= (1 << 7);    // A16 (Pin 38) -> PD7
+  DDRG |= 0b00000111;  // A17-A19 (Pins 39-41) -> PG2, PG1, PG0
+  DDRL |= (1 << 7);    // A20 (Pin 42) -> PL7
 
-  // First, set them to input
+  // Data pins default to input
   setDatPinsInput();
 
-  pinMode( nWE, OUTPUT );
-  pinMode( nRP, OUTPUT );
-  pinMode( nRB, INPUT );
-  pinMode( CE, OUTPUT );
-  pinMode( nOE, OUTPUT );
+  // Control pins direction setup
+  DDRE |= (1 << 4);    // nWE (Pin 2, PE4) OUTPUT
+  DDRE |= (1 << 5);    // nRP (Pin 3, PE5) OUTPUT
+  DDRG &= ~(1 << 5);   // nRB (Pin 4, PG5) INPUT
+  DDRB |= (1 << 2);    // CE (Pin 51, PB2) OUTPUT
+  DDRB |= (1 << 1);    // nOE (Pin 52, PB1) OUTPUT
 
-  digitalWrite( nWE, 1 );
-  digitalWrite( nRP, 1 );
-  digitalWrite( CE, 0 );
-  digitalWrite( nOE, 1 );
+  // Initial Control states
+  nWE_HIGH;
+  nRP_HIGH;
+  CE_LOW;
+  nOE_HIGH;
 }
 
 void setAddrPins( u32 addr ) {  
-  // A0 to A7
-  PORTA = (u8) ( (addr >> 0) & 0b11111111 );
+  // A0 to A7 (Direct mapping to PORTA)
+  PORTA = (u8)(addr & 0xFF);
   
-  // A8 to A15
-  u8 tmp = 0;
-  for ( int i = 0; i < 8; i ++ ) {
-    if ( addr & ( 1l << ( i + 8 ) ) ) {
-      tmp |= ( 1 << ( 7 - i ) );
-    }
-  }
-  PORTC = tmp;
+  // A8 to A15 map to PC7 to PC0. We bit-reverse this using branchless math 
+  // rather than a slow for-loop.
+  u8 a8_15 = (u8)((addr >> 8) & 0xFF);
+  a8_15 = (a8_15 & 0xF0) >> 4 | (a8_15 & 0x0F) << 4;
+  a8_15 = (a8_15 & 0xCC) >> 2 | (a8_15 & 0x33) << 2;
+  a8_15 = (a8_15 & 0xAA) >> 1 | (a8_15 & 0x55) << 1;
+  PORTC = a8_15;
   
-  // A16 to A20
-  if ( addr & ( 1l << 16 ) ) {
-    PORTD |= ( 1 << 7 );
+  // A16 (PD7)
+  if ( addr & (1ul << 16) ) {
+    PORTD |= (1 << 7); 
   } else {
-    PORTD &= ~( 1l << 7 );
+    PORTD &= ~(1 << 7);
   }
   
-  if ( addr & ( 1l << 17 ) ) {
-    PORTG |= ( 1 << 2 );
+  // A17 (PG2), A18 (PG1), A19 (PG0). Mask and shift in one go.
+  u8 pg_mask = (((addr >> 17) & 1) << 2) | 
+               (((addr >> 18) & 1) << 1) | 
+               (((addr >> 19) & 1));
+  PORTG = (PORTG & 0xF8) | pg_mask;
+  
+  // A20 (PL7)
+  if ( addr & (1ul << 20) ) { 
+    PORTL |= (1 << 7);
   } else {
-    PORTG &= ~( 1 << 2 );
+    PORTL &= ~(1 << 7);
   }
-  
-  if ( addr & ( 1l << 18 ) ) {
-    PORTG |= ( 1 << 1 );
-  } else {
-    PORTG &= ~( 1 << 1 );
-  }
-  
-  if ( addr & ( 1l << 19 ) ) {
-    PORTG |= ( 1 << 0 );
-  } else {
-    PORTG &= ~( 1 << 0 );
-  }
-  
-  if ( addr & ( 1l << 20 ) ) {
-    PORTL |= ( 1 << 7 );
-  } else {
-    PORTL &= ~( 1 << 7 );
-  }
-  
 }
 
 void setDataOutput( unsigned dat ) {
-  // Pin 43
-  if ( dat & ( 1 << 0 ) ) {
-    PORTL |= ( 1 << 6 );
-  } else {
-    PORTL &= ~( 1 << 6 );
-  }
+  // D0-D6 go to PL6-PL0 reversed. Branchless shift mapping.
+  u8 l_out = ((dat & 0x01) << 6) | ((dat & 0x02) << 4) | ((dat & 0x04) << 2) |
+             ((dat & 0x08)     ) | ((dat & 0x10) >> 2) | ((dat & 0x20) >> 4) |
+             ((dat & 0x40) >> 6);
+             
+  PORTL = (PORTL & 0x80) | l_out; // Apply leaving PL7 (A20) intact
   
-  // Pin 44
-  if ( dat & ( 1 << 1 ) ) {
-    PORTL |= ( 1 << 5 );
-  } else {
-    PORTL &= ~( 1 << 5 );
-  }
-  
-  // Pin 45
-  if ( dat & ( 1 << 2 ) ) {
-    PORTL |= ( 1 << 4 );
-  } else {
-    PORTL &= ~( 1 << 4 );
-  }
-  
-  // Pin 46
-  if ( dat & ( 1 << 3 ) ) {
-    PORTL |= ( 1 << 3 );
-  } else {
-    PORTL &= ~( 1 << 3 );
-  }
-  
-  // Pin 47
-  if ( dat & ( 1 << 4 ) ) {
-    PORTL |= ( 1 << 2 );
-  } else {
-    PORTL &= ~( 1 << 2 );
-  }
-  
-  // Pin 48
-  if ( dat & ( 1 << 5 ) ) {
-    PORTL |= ( 1 <<  1);
-  } else {
-    PORTL &= ~( 1 << 1 );
-  }
-  
-  // Pin 49
-  if ( dat & ( 1 << 6 ) ) {
-    PORTL |= ( 1 << 0 );
-  } else {
-    PORTL &= ~( 1 << 0 );
-  }
-  
-  // Pin 50
-  if ( dat & ( 1 << 7 ) ) {
-    PORTB |= ( 1 << 3 );
-  } else {
-    PORTB &= ~( 1 << 3 );
-  }
-  
+  // D7 goes to PB3
+  if (dat & 0x80) PORTB |= (1 << 3);
+  else PORTB &= ~(1 << 3);
 }
 
 // Dump game.
@@ -227,10 +161,10 @@ void doDump() {
   setDatPinsInput();
   
   // Activate chip.
-  digitalWrite( CE, 1 );
-  digitalWrite( nOE, 0 );
-  digitalWrite( nWE, 1 );
-  digitalWrite( nRP, 1 );
+  CE_HIGH;
+  nOE_LOW;
+  nWE_HIGH;
+  nRP_HIGH;
   
   // Wait.
   delayMicroseconds( 10 );
@@ -238,148 +172,123 @@ void doDump() {
 
   // Start dump.
   for ( u32 i = OFFSET; i < MAXADDR + OFFSET; ++i ) {
-    //Serial.println( i );
     setAddrPins( i );
-    // Wait.
     WAITSEQ;
-    // Read.
-    char dat = digitalRead( D0 );
-    dat |= digitalRead( D1 ) << 1;
-    dat |= digitalRead( D2 ) << 2;
-    dat |= digitalRead( D3 ) << 3;
-    dat |= digitalRead( D4 ) << 4;
-    dat |= digitalRead( D5 ) << 5;
-    dat |= digitalRead( D6 ) << 6;
-    dat |= digitalRead( D7 ) << 7;
+    
+    // Read data pins directly from PIN hardware registers.
+    // Reversing PL6-PL0 back into bits 0-6, and placing PB3 into bit 7.
+    u8 l = PINL;
+    char dat = ((l & 0x40) >> 6) | ((l & 0x20) >> 4) | ((l & 0x10) >> 2) |
+               ((l & 0x08)     ) | ((l & 0x04) << 2) | ((l & 0x02) << 4) |
+               ((l & 0x01) << 6) | ((PINB & 0x08) << 4);
 
     // Send it.
     Serial.write( dat );
   }
 
   // Turn off again.
-  digitalWrite( CE, 0 );
-  digitalWrite( nOE, 1 );
+  CE_LOW;
+  nOE_HIGH;
 }
 
 void writeToAddress( u32 addr, u8 data ) {
-  // Assuming nOE is HIGH
-  
   // Set the address.
   setAddrPins( addr );
   // Set the data.
   setDataOutput( data );
 
   // Activate chip.
-  digitalWrite( CE, 1 );
-  digitalWrite( nWE, 0 );
+  CE_HIGH;
+  nWE_LOW;
 
   WAITSEQ;
 
   // Deactivate.
-  digitalWrite( nWE, 1 );
-  digitalWrite( CE, 0 );
+  nWE_HIGH;
+  CE_LOW;
 }
 
 void unlockBypass() {
-  digitalWrite( CE, 1 );
-  digitalWrite( nOE, 1 );
-  digitalWrite( nWE, 1 );
+  CE_HIGH;
+  nOE_HIGH;
+  nWE_HIGH;
 
   setDatPinsOutput();
   
-  // First command.
   writeToAddress( 0xAAA, 0xAA );
   WAITSEQ;
 
-  // 2nd command.
   writeToAddress( 0x555, 0x55 );
   WAITSEQ;
 
-  // 3rd command.
   writeToAddress( 0xAAA, 0x20 );
   WAITSEQ;
 
   setDatPinsInput();
-  digitalWrite( nOE, 1 );
-  digitalWrite( nWE, 1 );
+  nOE_HIGH;
+  nWE_HIGH;
 }
 
 void unlockBypassReset() {
-  digitalWrite( CE, 1 );
-  digitalWrite( nOE, 1 );
-  digitalWrite( nWE, 1 );
+  CE_HIGH;
+  nOE_HIGH;
+  nWE_HIGH;
 
   setDatPinsOutput();
   
-  // First command (addr don't care)
   writeToAddress( 0x111, 0x90 );
   WAITSEQ;
 
-  // 2nd command. (addr don't care)
   writeToAddress( 0x111, 0x00 );
   WAITSEQ;
 
   setDatPinsInput();
-  digitalWrite( nOE, 1 );
-  digitalWrite( nWE, 1 );
+  nOE_HIGH;
+  nWE_HIGH;
 }
 
 void doBypassProgram( u32 addr, u8 data ) {
-  digitalWrite( CE, 1 );
-  digitalWrite( nOE, 1 );
-  digitalWrite( nWE, 1 );
+  CE_HIGH;
+  nOE_HIGH;
+  nWE_HIGH;
 
   setDatPinsOutput();
   
-  // First command (addr don't care)
   writeToAddress( 0x111, 0xA0 );
   WAITSEQ;
 
-  // 2nd command. (addr don't care)
   writeToAddress( addr, data );
   WAITSEQ;
 
   setDatPinsInput();
-  digitalWrite( nOE, 1 );
-  digitalWrite( nWE, 1 );
+  nOE_HIGH;
+  nWE_HIGH;
 }
 
 void doChipErase() {
-  digitalWrite( CE, 1 );
-  digitalWrite( nOE, 1 );
-  digitalWrite( nWE, 1 );
+  CE_HIGH;
+  nOE_HIGH;
+  nWE_HIGH;
   
   setDatPinsOutput();
   
-  // First command.
   writeToAddress( 0xAAA, 0xAA );
   WAITSEQ;
-  
-  // Second command.
   writeToAddress( 0x555, 0x55 );
   WAITSEQ;
-
-  // 3rd command.
   writeToAddress( 0xAAA, 0x80 );
   WAITSEQ;
-
-  // 4th command.
   writeToAddress( 0xAAA, 0xAA );
   WAITSEQ;
-
-  // 5th command.
   writeToAddress( 0x555, 0x55 );
   WAITSEQ;
-
-  // 6th command.
   writeToAddress( 0xAAA, 0x10 );
 
-  // Wait up to 120 s
-  delay( 120000 );
+  delay( ERASE_WAIT_MS );
 
   setDatPinsInput();
-  digitalWrite( nOE, 1 );
-  digitalWrite( nWE, 1 );
+  nOE_HIGH;
+  nWE_HIGH;
 }
 
 void doProgram( u32 addr, u8 data ) {
@@ -394,99 +303,77 @@ void doProgram( u32 addr, u8 data ) {
   WAITSEQ;
 }
 
-
 void doFlash() {
-  // First set data pins to output.
-  digitalWrite( nRP, 1 );
+  nRP_HIGH;
 
-  digitalWrite( CE, 1 );
-  digitalWrite( nOE, 1 );
-  digitalWrite( nWE, 1 );
+  CE_HIGH;
+  nOE_HIGH;
+  nWE_HIGH;
 
   setDatPinsOutput();
 
-  // Wait until we receive the first byte.
   u32 nrBytes = 0;
 
   while ( nrBytes < MAXADDR ) {
     if ( Serial.available() >= RXBYTES ) {
       for ( int i = 0; i < RXBYTES; ++i ) {
         char b = Serial.read();
-  
         doProgram( nrBytes, b );
         ++nrBytes;
       }
-
-      // Send conf.
       char conf = 1;
       Serial.write( conf );
       Serial.flush();
     }
   }
 
-    // Turn off again.
-  digitalWrite( CE, 0 );
-  digitalWrite( nOE, 1 );
-  digitalWrite( nWE, 1 );
+  CE_LOW;
+  nOE_HIGH;
+  nWE_HIGH;
   
   setDatPinsInput();
 }
 
 void doFlashBypass() {
-  // First set data pins to output.
-  digitalWrite( CE, 1 );
-  digitalWrite( nOE, 1 );
-  digitalWrite( nWE, 1 );
+  CE_HIGH;
+  nOE_HIGH;
+  nWE_HIGH;
 
   setDatPinsOutput();
 
-  // Wait until we receive the first byte.
   u32 nrBytes = 0;
-
-  // Do unlock bypass
   unlockBypass();
 
   while ( nrBytes < MAXADDR ) {
     if ( Serial.available() >= RXBYTES ) {
       for ( int i = 0; i < RXBYTES; ++i ) {
         char b = Serial.read();
-  
         doBypassProgram( nrBytes, b );
         ++nrBytes;
       }
-
-      // Send conf.
       char conf = 1;
       Serial.write( conf );
       Serial.flush();
     }
   }
 
-    // Turn off again.
-  digitalWrite( CE, 0 );
-  digitalWrite( nOE, 1 );
-  digitalWrite( nWE, 1 );
+  CE_LOW;
+  nOE_HIGH;
+  nWE_HIGH;
   
   setDatPinsInput();
-
-  // Reset unlock bypass
   unlockBypassReset();
 }
 
 void loop() {
-  
   if ( Serial.available() ) {
     char rx = Serial.read();
     if ( rx == 42 ) {
       doDump();
-      
     } else if ( rx == 82 ) {
-      // Write.
       doFlashBypass();
-
     } else if ( rx == 14 ) {
       unlockBypassReset();
-      
     } else if ( rx == 123 ) {
       doChipErase();
       Serial.write( 42 );
